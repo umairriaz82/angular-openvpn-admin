@@ -1,1 +1,41 @@
-<p>Hello world!</p>
+<div class="p-6">
+    <div class="flex justify-between items-center mb-6">
+        <h1 class="text-2xl font-bold">VPN Clients</h1>
+        <button (click)="createNewClient()" class="bg-blue-500 text-white px-4 py-2 rounded">
+            Create New Client
+        </button>
+    </div>
+
+    <div class="overflow-x-auto">
+        <table class="min-w-full bg-white">
+            <thead>
+                <tr>
+                    <th class="px-6 py-3 border-b">Name</th>
+                    <th class="px-6 py-3 border-b">Status</th>
+                    <th class="px-6 py-3 border-b">Last Connected</th>
+                    <th class="px-6 py-3 border-b">Bytes Received</th>
+                    <th class="px-6 py-3 border-b">Bytes Sent</th>
+                    <th class="px-6 py-3 border-b">Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr *ngFor="let client of clients">
+                    <td class="px-6 py-4 border-b">{{client.name}}</td>
+                    <td class="px-6 py-4 border-b">
+                        <span [class]="client.status === 'connected' ? 'text-green-500' : 'text-red-500'">
+                            {{client.status}}
+                        </span>
+                    </td>
+                    <td class="px-6 py-4 border-b">{{client.last_connected | date:'medium'}}</td>
+                    <td class="px-6 py-4 border-b">{{client.bytes_received | number}} bytes</td>
+                    <td class="px-6 py-4 border-b">{{client.bytes_sent | number}} bytes</td>
+                    <td class="px-6 py-4 border-b">
+                        <button (click)="deleteClient(client.name)" class="text-red-500">
+                            Delete
+                        </button>
+                    </td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+</div>

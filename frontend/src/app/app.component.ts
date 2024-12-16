@@ -15,7 +15,7 @@ import KTLayout from '../metronic/app/layouts/demo1';
 	styleUrl: './app.component.scss'
 })
 export class AppComponent implements AfterViewInit, OnInit {
-	title = 'metronic-tailwind-angular';
+	title = 'angular-openvpn';
 	@HostBinding('class') hostClass = 'flex grow';
 
 	ngAfterViewInit(): void {
