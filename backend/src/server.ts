@@ -6,6 +6,7 @@ import { exec } from 'child_process';
 import { promisify } from 'util';
 import path from 'path';
 import jwt from 'jsonwebtoken';
+import fs from 'fs';
 
 const execAsync = promisify(exec);
 const app = express();
@@ -116,6 +117,48 @@ const initializeDatabase = async () => {
             res.json(clients);
         } catch (error) {
             res.status(500).json({ error: 'Failed to fetch clients' });
+        }
+    });
+
+    app.get('/api/clients/:name/config', authenticateToken, async (req, res) => {
+        try {
+            const { name } = req.params;
+            
+            // Check if client exists
+            const client = await db.get('SELECT * FROM vpn_clients WHERE name = ?', name);
+            if (!client) {
+                return res.status(404).json({ error: 'Client not found' });
+            }
+
+            // Path to the client config template and keys
+            const templatePath = '/etc/openvpn/client-template.txt';
+            const caPath = '/etc/openvpn/easy-rsa/pki/ca.crt';
+            const certPath = `/etc/openvpn/easy-rsa/pki/issued/${name}.crt`;
+            const keyPath = `/etc/openvpn/easy-rsa/pki/private/${name}.key`;
+
+            // Read all necessary files
+            const [template, ca, cert, key] = await Promise.all([
+                fs.promises.readFile(templatePath, 'utf8'),
+                fs.promises.readFile(caPath, 'utf8'),
+                fs.promises.readFile(certPath, 'utf8'),
+                fs.promises.readFile(keyPath, 'utf8')
+            ]);
+
+            // Generate config file content
+            let config = template
+                .replace('{{CLIENT_NAME}}', name)
+                .replace('{{CA_CERT}}', ca)
+                .replace('{{CLIENT_CERT}}', cert)
+                .replace('{{CLIENT_KEY}}', key);
+
+            // Set headers for file download
+            res.setHeader('Content-Type', 'application/x-openvpn-profile');
+            res.setHeader('Content-Disposition', `attachment; filename=${name}.ovpn`);
+            res.send(config);
+
+        } catch (error) {
+            console.error('Error generating client config:', error);
+            res.status(500).json({ error: 'Failed to generate client configuration' });
         }
     });
 

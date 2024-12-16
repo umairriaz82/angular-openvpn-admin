@@ -41,4 +41,15 @@ export class IndexComponent implements OnInit {
             });
         }
     }
+
+    downloadConfig(name: string) {
+        this.vpnService.downloadClientConfig(name).subscribe(blob => {
+            const url = window.URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = `${name}.ovpn`;
+            link.click();
+            window.URL.revokeObjectURL(url);
+        });
+    }
 }

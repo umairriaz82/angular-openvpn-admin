@@ -30,8 +30,11 @@
                     <td class="px-6 py-4 border-b">{{client.bytes_received | number}} bytes</td>
                     <td class="px-6 py-4 border-b">{{client.bytes_sent | number}} bytes</td>
                     <td class="px-6 py-4 border-b">
-                        <button (click)="deleteClient(client.name)" class="text-red-500">
+                        <button (click)="deleteClient(client.name)" class="text-red-500 mr-2">
                             Delete
+                        </button>
+                        <button (click)="downloadConfig(client.name)" class="text-blue-500">
+                            Download Config
                         </button>
                     </td>
                 </tr>

@@ -33,4 +33,11 @@ export class VpnService {
     deleteClient(name: string): Observable<any> {
         return this.http.delete(`${this.apiUrl}/clients/${name}`, { headers: this.getHeaders() });
     }
+
+    downloadClientConfig(name: string): Observable<Blob> {
+        return this.http.get(`${this.apiUrl}/clients/${name}/config`, {
+            headers: this.getHeaders(),
+            responseType: 'blob'
+        });
+    }
 }
