@@ -1,28 +1,51 @@
-import { Component, OnInit } from '@angular/core';
+import { Component, OnInit, OnDestroy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { VpnService } from '../../services/vpn.service';
 import { VpnClient } from '../../interfaces/client.interface';
+import { BytesPipe } from '../../pipes/bytes.pipe';
 
 @Component({
     selector: 'app-index',
     standalone: true,
-    imports: [CommonModule],
+    imports: [CommonModule, BytesPipe],
     templateUrl: './index.component.html',
     styleUrls: ['./index.component.scss']
 })
-export class IndexComponent implements OnInit {
+export class IndexComponent implements OnInit, OnDestroy {
     clients: VpnClient[] = [];
+    private updateInterval: any;
+    error: string = '';
+    lastUpdated: Date = new Date();
 
     constructor(private vpnService: VpnService) {}
 
     ngOnInit() {
         this.loadClients();
+        // Poll for updates every 5 seconds
+        this.updateInterval = setInterval(() => {
+            this.loadClients();
+        }, 5000);
+    }
+
+    ngOnDestroy() {
+        if (this.updateInterval) {
+            clearInterval(this.updateInterval);
+        }
     }
 
     loadClients() {
-        this.vpnService.getClients().subscribe(
-            clients => this.clients = clients
-        );
+        console.log('Fetching clients...'); // Debug log
+        this.lastUpdated = new Date();
+        this.vpnService.getClients().subscribe({
+            next: (clients) => {
+                console.log('Received clients:', clients); // Debug log
+                this.clients = clients;
+            },
+            error: (error) => {
+                console.error('Error loading clients:', error);
+                this.error = 'Failed to load clients';
+            }
+        });
     }
 
     createNewClient() {

@@ -6,7 +6,7 @@ import { exec } from 'child_process';
 import { promisify } from 'util';
 import path from 'path';
 import jwt from 'jsonwebtoken';
-import fs from 'fs';
+import * as fs from 'fs';
 
 const execAsync = promisify(exec);
 const app = express();
@@ -53,6 +53,121 @@ const initializeDatabase = async () => {
 
     return db;
 };
+
+// Add this function to periodically update client status
+async function updateClientStatus() {
+    try {
+        // Read the status log file
+        const statusLog = await fs.promises.readFile('/var/log/openvpn/openvpn-status.log', 'utf8');
+        console.log('Status log content:', statusLog);
+
+        const lines = statusLog.split('\n');
+        const clientStats = new Map();
+
+        // Different possible section markers
+        let inClientSection = false;
+        let inRoutingSection = false;
+
+        for (const line of lines) {
+            // Debug logging
+            console.log('Processing line:', line);
+
+            // Check for section headers
+            if (line.includes('CLIENT LIST')) {
+                inClientSection = true;
+                inRoutingSection = false;
+                continue;
+            } else if (line.includes('ROUTING TABLE')) {
+                inClientSection = false;
+                inRoutingSection = true;
+                continue;
+            }
+
+            // Process client list section
+            if (inClientSection && line.trim()) {
+                const parts = line.split(',').map(part => part.trim());
+                
+                // Skip header line
+                if (parts[0] === 'Common Name') continue;
+                
+                // Skip UNDEF entries
+                if (parts[0] && !parts[0].includes('UNDEF')) {
+                    const clientName = parts[0];
+                    const bytesReceived = parseInt(parts[2]) || 0;
+                    const bytesSent = parseInt(parts[3]) || 0;
+                    const connectedSince = parts[4] || new Date().toISOString();
+
+                    console.log('Found connected client:', {
+                        name: clientName,
+                        bytesReceived,
+                        bytesSent,
+                        connectedSince
+                    });
+
+                    clientStats.set(clientName, {
+                        status: 'connected',
+                        last_connected: connectedSince,
+                        bytes_received: bytesReceived,
+                        bytes_sent: bytesSent
+                    });
+                }
+            }
+        }
+
+        // Debug log the found clients
+        console.log('Found clients:', Array.from(clientStats.entries()));
+
+        const db = await open({
+            filename: 'vpn.db',
+            driver: sqlite3.Database
+        });
+
+        // Get current clients from database
+        const currentClients = await db.all('SELECT name, status FROM vpn_clients');
+        console.log('Current clients in database:', currentClients);
+
+        // Set all clients to disconnected first
+        await db.run(`
+            UPDATE vpn_clients 
+            SET status = 'disconnected' 
+            WHERE status = 'connected'
+        `);
+
+        // Update connected clients
+        for (const [name, stats] of clientStats.entries()) {
+            console.log(`Updating client ${name} with stats:`, stats);
+            
+            const result = await db.run(`
+                UPDATE vpn_clients 
+                SET status = ?, 
+                    last_connected = ?, 
+                    bytes_received = ?, 
+                    bytes_sent = ? 
+                WHERE name = ?
+            `, 
+            stats.status,
+            stats.last_connected,
+            stats.bytes_received,
+            stats.bytes_sent,
+            name
+            );
+
+            console.log(`Update result for ${name}:`, result);
+        }
+
+        // Verify the updates
+        const updatedClients = await db.all('SELECT * FROM vpn_clients');
+        console.log('Updated clients in database:', updatedClients);
+
+    } catch (error: any) {
+        console.error('Error updating client status:', error?.message || 'Unknown error');
+        console.error('Error details:', {
+            name: error?.name,
+            code: error?.code,
+            stack: error?.stack
+        });
+    }
+}
 
 // Initialize database and start server
 (async () => {
@@ -103,10 +218,30 @@ const initializeDatabase = async () => {
     app.delete('/api/clients/:name', authenticateToken, async (req, res) => {
         try {
             const { name } = req.params;
+            
+            // First, kill any active connection for this client
+            await execAsync(`echo "kill ${name}" | nc localhost 7505`);
+            
+            // Revoke the client certificate
             await execAsync(`cd /etc/openvpn/easy-rsa && ./easyrsa revoke ${name}`);
+            
+            // Generate new CRL
+            await execAsync(`cd /etc/openvpn/easy-rsa && ./easyrsa gen-crl`);
+            
+            // Copy new CRL to OpenVPN directory
+            await execAsync('cp /etc/openvpn/easy-rsa/pki/crl.pem /etc/openvpn/');
+            
+            // Remove client files
+            await execAsync(`rm -f /etc/openvpn/easy-rsa/pki/issued/${name}.crt`);
+            await execAsync(`rm -f /etc/openvpn/easy-rsa/pki/private/${name}.key`);
+            await execAsync(`rm -f /etc/openvpn/easy-rsa/pki/reqs/${name}.req`);
+            
+            // Remove from database
             await db.run('DELETE FROM vpn_clients WHERE name = ?', name);
+            
             res.json({ message: 'Client deleted successfully' });
         } catch (error) {
+            console.error('Error deleting client:', error);
             res.status(500).json({ error: 'Failed to delete client' });
         }
     });
@@ -114,8 +249,10 @@ const initializeDatabase = async () => {
     app.get('/api/clients', authenticateToken, async (req, res) => {
         try {
             const clients = await db.all('SELECT * FROM vpn_clients');
+            console.log('Sending clients to frontend:', clients); // Debug log
             res.json(clients);
         } catch (error) {
+            console.error('Error fetching clients:', error);
             res.status(500).json({ error: 'Failed to fetch clients' });
         }
     });
@@ -171,4 +308,20 @@ const initializeDatabase = async () => {
     app.listen(PORT, () => {
         console.log(`Server running on port ${PORT}`);
     });
+
+    // Run immediately and log any errors
+    try {
+        await updateClientStatus();
+    } catch (error: any) {
+        console.error('Initial update failed:', error);
+    }
+
+    // Schedule updates
+    setInterval(async () => {
+        try {
+            await updateClientStatus();
+        } catch (error: any) {
+            console.error('Scheduled update failed:', error);
+        }
+    }, 5000);
 })();

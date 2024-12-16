@@ -6,6 +6,14 @@
         </button>
     </div>
 
+    <div *ngIf="error" class="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-4">
+        {{ error }}
+    </div>
+
+    <div class="mb-4 text-sm text-gray-600">
+        Last updated: {{ lastUpdated | date:'medium' }}
+    </div>
+
     <div class="overflow-x-auto">
         <table class="min-w-full bg-white">
             <thead>
@@ -24,18 +32,23 @@
                     <td class="px-6 py-4 border-b">
                         <span [class]="client.status === 'connected' ? 'text-green-500' : 'text-red-500'">
                             {{client.status}}
+                            <small class="block text-gray-500">
+                                Last updated: {{client.last_connected | date:'medium'}}
+                            </small>
                         </span>
                     </td>
                     <td class="px-6 py-4 border-b">{{client.last_connected | date:'medium'}}</td>
-                    <td class="px-6 py-4 border-b">{{client.bytes_received | number}} bytes</td>
-                    <td class="px-6 py-4 border-b">{{client.bytes_sent | number}} bytes</td>
+                    <td class="px-6 py-4 border-b">{{client.bytes_received | bytes}}</td>
+                    <td class="px-6 py-4 border-b">{{client.bytes_sent | bytes}}</td>
                     <td class="px-6 py-4 border-b">
-                        <button (click)="deleteClient(client.name)" class="text-red-500 mr-2">
+                        <button (click)="deleteClient(client.name)" class="text-red-500">
                             Delete
                         </button>
-                        <button (click)="downloadConfig(client.name)" class="text-blue-500">
-                            Download Config
-                        </button>
+                    </td>
+                </tr>
+                <tr *ngIf="clients.length === 0">
+                    <td colspan="6" class="px-6 py-4 border-b text-center text-gray-500">
+                        No clients found
                     </td>
                 </tr>
             </tbody>

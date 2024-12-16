@@ -1,7 +1,7 @@
 // frontend/src/app/services/vpn.service.ts
 import { Injectable } from '@angular/core';
 import { HttpClient, HttpHeaders } from '@angular/common/http';
-import { Observable } from 'rxjs';
+import { Observable, tap, catchError, throwError } from 'rxjs';
 import { VpnClient } from '../interfaces/client.interface';
 import { AuthService } from './auth.service';
 
@@ -23,7 +23,14 @@ export class VpnService {
     }
 
     getClients(): Observable<VpnClient[]> {
-        return this.http.get<VpnClient[]>(`${this.apiUrl}/clients`, { headers: this.getHeaders() });
+        return this.http.get<VpnClient[]>(`${this.apiUrl}/clients`, { headers: this.getHeaders() })
+            .pipe(
+                tap(clients => console.log('Received clients from backend:', clients)),
+                catchError(error => {
+                    console.error('Error fetching clients:', error);
+                    return throwError(() => error);
+                })
+            );
     }
 
     createClient(name: string): Observable<any> {
