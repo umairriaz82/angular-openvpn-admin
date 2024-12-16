@@ -267,6 +267,31 @@ verify_installation() {
     print_info "Installation verification completed successfully"
 }
 
+# Function to install Node.js and npm
+install_nodejs() {
+    print_info "Installing Node.js and npm..."
+    
+    # Install curl if not present
+    apt-get install -y curl
+    
+    # Install Node.js repository
+    curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
+    
+    # Install Node.js and npm
+    apt-get install -y nodejs
+    
+    # Verify installation
+    NODE_VERSION=$(node --version)
+    NPM_VERSION=$(npm --version)
+    
+    print_info "Node.js version: $NODE_VERSION"
+    print_info "npm version: $NPM_VERSION"
+}
+
+
+
+
+
 # Main script execution
 main() {
     check_root
@@ -286,6 +311,9 @@ main() {
     
     # Verify installation
     verify_installation
+
+     install_nodejs
+  
     
     print_info "OpenVPN server has been successfully installed and configured!"
     print_info "Server Address: $SERVER_ADDRESS"
@@ -293,6 +321,7 @@ main() {
     print_info "Protocol: UDP"
     print_info "Client configuration files can be generated using:"
     print_info "cd /etc/openvpn/easy-rsa && ./easyrsa build-client-full CLIENT_NAME nopass"
+
 }
 
 # Run main function
