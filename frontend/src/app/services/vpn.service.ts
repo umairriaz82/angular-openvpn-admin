@@ -25,7 +25,7 @@ export class VpnService {
     getClients(): Observable<VpnClient[]> {
         return this.http.get<VpnClient[]>(`${this.apiUrl}/clients`, { headers: this.getHeaders() })
             .pipe(
-                tap(clients => console.log('Received clients from backend:', clients)),
+                tap(clients => console.log('Received clients:', clients)),
                 catchError(error => {
                     console.error('Error fetching clients:', error);
                     return throwError(() => error);
@@ -41,10 +41,16 @@ export class VpnService {
         return this.http.delete(`${this.apiUrl}/clients/${name}`, { headers: this.getHeaders() });
     }
 
-    downloadClientConfig(name: string): Observable<Blob> {
-        return this.http.get(`${this.apiUrl}/clients/${name}/config`, {
+    downloadConfig(clientName: string): Observable<Blob> {
+        return this.http.get(`${this.apiUrl}/clients/${clientName}/config`, {
             headers: this.getHeaders(),
             responseType: 'blob'
-        });
+        }).pipe(
+            tap(() => console.log(`Downloading config for ${clientName}`)),
+            catchError(error => {
+                console.error('Error downloading config:', error);
+                return throwError(() => error);
+            })
+        );
     }
 }

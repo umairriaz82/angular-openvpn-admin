@@ -65,14 +65,28 @@ export class IndexComponent implements OnInit, OnDestroy {
         }
     }
 
-    downloadConfig(name: string) {
-        this.vpnService.downloadClientConfig(name).subscribe(blob => {
-            const url = window.URL.createObjectURL(blob);
-            const link = document.createElement('a');
-            link.href = url;
-            link.download = `${name}.ovpn`;
-            link.click();
-            window.URL.revokeObjectURL(url);
+    downloadConfig(clientName: string) {
+        console.log(`Initiating download for ${clientName}`);
+        this.vpnService.downloadConfig(clientName).subscribe({
+            next: (blob: Blob) => {
+                const url = window.URL.createObjectURL(blob);
+                const link = document.createElement('a');
+                link.href = url;
+                link.download = `${clientName}.ovpn`;
+                
+                // Append to body, click and remove
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+                
+                // Cleanup
+                window.URL.revokeObjectURL(url);
+                console.log(`Download completed for ${clientName}`);
+            },
+            error: (error) => {
+                console.error('Error downloading config:', error);
+                this.error = `Failed to download configuration for ${clientName}`;
+            }
         });
     }
 }

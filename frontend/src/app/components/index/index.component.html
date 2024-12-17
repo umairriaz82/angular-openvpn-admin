@@ -40,8 +40,13 @@
                     <td class="px-6 py-4 border-b">{{client.last_connected | date:'medium'}}</td>
                     <td class="px-6 py-4 border-b">{{client.bytes_received | bytes}}</td>
                     <td class="px-6 py-4 border-b">{{client.bytes_sent | bytes}}</td>
-                    <td class="px-6 py-4 border-b">
-                        <button (click)="deleteClient(client.name)" class="text-red-500">
+                    <td class="px-6 py-4 border-b flex gap-2">
+                        <button (click)="downloadConfig(client.name)" 
+                                class="text-blue-500 hover:text-blue-700">
+                            Download
+                        </button>
+                        <button (click)="deleteClient(client.name)" 
+                                class="text-red-500 hover:text-red-700 ml-2">
                             Delete
                         </button>
                     </td>
