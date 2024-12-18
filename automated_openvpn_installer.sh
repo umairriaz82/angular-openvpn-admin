@@ -31,52 +31,73 @@ check_root() {
 cleanup_existing() {
     print_info "Cleaning up existing OpenVPN and web application installation..."
     
+    # Function to safely execute commands
+    safe_execute() {
+        local cmd="$1"
+        local description="$2"
+        
+        print_info "Executing: $description"
+        if ! eval "$cmd" 2>/dev/null; then
+            print_warning "Non-critical error during: $description"
+        fi
+    }
+    
     # Stop services if running
     print_info "Stopping services..."
-    systemctl stop openvpn@server 2>/dev/null
-    systemctl stop openvpn-admin 2>/dev/null
+    safe_execute "systemctl stop openvpn@server" "stopping OpenVPN service"
+    safe_execute "systemctl stop openvpn-admin" "stopping web admin service"
     
     # Disable services
     print_info "Disabling services..."
-    systemctl disable openvpn@server 2>/dev/null
-    systemctl disable openvpn-admin 2>/dev/null
+    safe_execute "systemctl disable openvpn@server" "disabling OpenVPN service"
+    safe_execute "systemctl disable openvpn-admin" "disabling web admin service"
     
     # Remove systemd service files
     print_info "Removing service files..."
-    rm -f /etc/systemd/system/openvpn-admin.service
-    rm -f /etc/systemd/system/openvpn-iptables.service
-    systemctl daemon-reload
+    safe_execute "rm -f /etc/systemd/system/openvpn-admin.service" "removing admin service file"
+    safe_execute "rm -f /etc/systemd/system/openvpn-iptables.service" "removing iptables service file"
+    safe_execute "systemctl daemon-reload" "reloading systemd"
     
     # Remove OpenVPN packages
     print_info "Removing OpenVPN packages..."
-    apt-get remove --purge -y openvpn easy-rsa 2>/dev/null
+    safe_execute "apt-get remove --purge -y openvpn easy-rsa" "removing OpenVPN packages"
     
     # Remove web application
     print_info "Removing web application..."
-    rm -rf /opt/openvpn-admin
+    safe_execute "rm -rf /opt/openvpn-admin" "removing web application directory"
     
     # Remove OpenVPN directories and files
     print_info "Removing OpenVPN directories and files..."
-    rm -rf /etc/openvpn
-    rm -rf /usr/share/easy-rsa
-    rm -rf /var/log/openvpn
+    safe_execute "rm -rf /etc/openvpn" "removing OpenVPN config directory"
+    safe_execute "rm -rf /usr/share/easy-rsa" "removing easy-rsa directory"
+    safe_execute "rm -rf /var/log/openvpn" "removing OpenVPN logs"
     
     # Remove database file if exists
     print_info "Removing database..."
-    rm -f /opt/openvpn-admin/backend/vpn.db
+    safe_execute "rm -f /opt/openvpn-admin/backend/vpn.db" "removing database file"
     
     # Clean up any remaining processes
     print_info "Cleaning up processes..."
-    pkill -f "openvpn" 2>/dev/null || true
-    pkill -f "ts-node" 2>/dev/null || true
+    if pgrep -f "openvpn" > /dev/null; then
+        safe_execute "pkill -f 'openvpn'" "killing OpenVPN processes"
+        sleep 2  # Give processes time to terminate
+    fi
+    
+    if pgrep -f "ts-node" > /dev/null; then
+        safe_execute "pkill -f 'ts-node'" "killing Node.js processes"
+        sleep 2  # Give processes time to terminate
+    fi
     
     # Clean up iptables rules
     print_info "Cleaning up iptables rules..."
-    iptables -t nat -F
-    iptables -t nat -X
-    rm -f /etc/iptables/rules.v4
+    safe_execute "iptables -t nat -F" "flushing NAT rules"
+    safe_execute "iptables -t nat -X" "deleting NAT chains"
+    safe_execute "rm -f /etc/iptables/rules.v4" "removing iptables rules file"
     
     print_info "Cleanup completed successfully"
+    
+    # Small delay to ensure all processes are properly terminated
+    sleep 3
 }
 
 # Function to get public IP
@@ -194,10 +215,11 @@ install_packages() {
 configure_firewall() {
     print_info "Configuring firewall..."
     
-    # Allow SSH (port 22) and OpenVPN port
+    # Allow SSH, OpenVPN, HTTP, and HTTPS
     ufw allow ssh
     ufw allow $PORT/udp
-    ufw allow 3000/tcp
+    ufw allow 80/tcp   # HTTP
+    ufw allow 443/tcp  # HTTPS
     
     # Enable UFW if not already enabled
     if ! ufw status | grep -q "Status: active"; then
@@ -440,13 +462,15 @@ deploy_web_application() {
     print_info "Setting up backend..."
     cd ../backend
 
-    # Install backend dependencies
+    # Install backend dependencies including security packages
     print_info "Installing backend dependencies..."
     npm install
+    npm install helmet express-rate-limit cors jsonwebtoken
+    npm install @types/helmet @types/express-rate-limit @types/cors @types/jsonwebtoken --save-dev
 
-    # Install TypeScript and ts-node globally
-    print_info "Installing TypeScript and ts-node globally..."
-    npm install -g typescript ts-node
+    # Create JWT secret and store it in environment
+    JWT_SECRET=$(openssl rand -hex 32)
+    echo "JWT_SECRET=$JWT_SECRET" > /opt/openvpn-admin/backend/.env
 
     # Create logs directory
     print_info "Creating logs directory..."
@@ -467,6 +491,8 @@ ExecStart=/usr/bin/ts-node src/server.ts
 Restart=always
 Environment=NODE_ENV=production
 Environment=PORT=3000
+Environment=JWT_SECRET=${JWT_SECRET}
+Environment=SERVER_ADDRESS=${SERVER_ADDRESS}
 
 [Install]
 WantedBy=multi-user.target
@@ -503,7 +529,88 @@ EOF
     systemctl restart openvpn@server
 
     print_info "Web application deployment completed successfully"
-    print_info "You can access the admin interface at http://your-server-ip:3000"
+}
+
+# Add this new function to setup SSL and Nginx
+setup_web_server() {
+    print_info "Setting up secure web server..."
+
+    # Install Nginx and Certbot
+    apt-get install -y nginx certbot python3-certbot-nginx
+
+    # Create Nginx configuration for the web application
+    cat > /etc/nginx/sites-available/openvpn-admin <<EOF
+server {
+    listen 80;
+    server_name ${SERVER_ADDRESS};
+
+    # Redirect all HTTP traffic to HTTPS
+    location / {
+        return 301 https://\$host\$request_uri;
+    }
+}
+
+server {
+    listen 443 ssl;
+    server_name ${SERVER_ADDRESS};
+
+    # SSL configuration
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_prefer_server_ciphers on;
+    ssl_ciphers ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305:DHE-RSA-AES128-GCM-SHA256:DHE-RSA-AES256-GCM-SHA384;
+    ssl_session_timeout 1d;
+    ssl_session_cache shared:SSL:50m;
+    ssl_stapling on;
+    ssl_stapling_verify on;
+    add_header Strict-Transport-Security "max-age=31536000" always;
+
+    # Proxy settings
+    location / {
+        proxy_pass http://localhost:3000;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host \$host;
+        proxy_cache_bypass \$http_upgrade;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+    }
+}
+EOF
+
+    # Enable the site
+    ln -sf /etc/nginx/sites-available/openvpn-admin /etc/nginx/sites-enabled/
+    rm -f /etc/nginx/sites-enabled/default
+
+    # Test Nginx configuration
+    nginx -t
+
+    # Obtain SSL certificate
+    if [[ "${SERVER_ADDRESS}" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+        print_warning "Using IP address. Self-signed certificate will be generated."
+        # Generate self-signed certificate
+        openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+            -keyout /etc/ssl/private/nginx-selfsigned.key \
+            -out /etc/ssl/certs/nginx-selfsigned.crt \
+            -subj "/CN=${SERVER_ADDRESS}"
+        
+        # Update Nginx configuration for self-signed cert
+        sed -i "s/ssl_certificate .*$/ssl_certificate \/etc\/ssl\/certs\/nginx-selfsigned.crt;/" /etc/nginx/sites-available/openvpn-admin
+        sed -i "s/ssl_certificate_key .*$/ssl_certificate_key \/etc\/ssl\/private\/nginx-selfsigned.key;/" /etc/nginx/sites-available/openvpn-admin
+    else
+        print_info "Using domain name. Obtaining Let's Encrypt certificate..."
+        certbot --nginx -d "${SERVER_ADDRESS}" --non-interactive --agree-tos --email "admin@${SERVER_ADDRESS}" --redirect
+    fi
+
+    # Update firewall rules
+    ufw allow 'Nginx Full'
+
+    # Restart Nginx
+    systemctl restart nginx
+    systemctl enable nginx
+
+    print_info "Web server setup completed"
 }
 
 # Main script execution
@@ -531,14 +638,14 @@ main() {
     # Install Node.js and deploy web application
     install_nodejs
     deploy_web_application
+    setup_web_server
     
     print_info "OpenVPN server and admin interface have been successfully installed!"
-    print_info "Server Address: $SERVER_ADDRESS"
-    print_info "Port: $PORT"
+    print_info "Server Address: https://${SERVER_ADDRESS}"
+    print_info "Port: ${PORT}"
     print_info "Protocol: UDP"
-    print_info "Admin Interface: http://$SERVER_ADDRESS:3000"
-    print_info "Admin Username: $ADMIN_USERNAME"
-    print_info "Admin Password: [as configured]"
+    print_info "Admin Interface: https://${SERVER_ADDRESS}"
+    print_info "Default admin credentials: admin/admin123"
 }
 
 # Run main function

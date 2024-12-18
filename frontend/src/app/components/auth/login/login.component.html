@@ -1,38 +1,99 @@
-<div class="min-h-screen flex items-center justify-center bg-gray-100">
-    <div class="max-w-md w-full space-y-8 p-8 bg-white rounded-lg shadow-md">
-        <div>
-            <h2 class="text-center text-3xl font-extrabold text-gray-900">
-                Sign in to your account
+<div class="min-h-screen flex items-center justify-center bg-gray-50">
+    <div class="max-w-md w-full">
+        <!-- Logo/Brand section -->
+        <div class="text-center mb-10">
+            <svg class="mx-auto h-12 w-12 text-indigo-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M13.19 8.688a4.5 4.5 0 011.242 7.244l-4.5 4.5a4.5 4.5 0 01-6.364-6.364l1.757-1.757m13.35-.622l1.757-1.757a4.5 4.5 0 00-6.364-6.364l-4.5 4.5a4.5 4.5 0 001.242 7.244" />
+            </svg>
+            <h2 class="mt-6 text-3xl font-bold tracking-tight text-gray-900">
+                OpenVPN Admin Portal
             </h2>
+            <p class="mt-2 text-sm text-gray-600">
+                Sign in to manage your VPN clients
+            </p>
         </div>
-        <form class="mt-8 space-y-6" (ngSubmit)="onSubmit()">
-            <div class="rounded-md shadow-sm -space-y-px">
-                <div>
-                    <label for="username" class="sr-only">Username</label>
-                    <input id="username" name="username" type="text" required
-                        [(ngModel)]="username"
-                        class="appearance-none rounded-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-t-md focus:outline-none focus:ring-blue-500 focus:border-blue-500 focus:z-10 sm:text-sm"
-                        placeholder="Username">
-                </div>
-                <div>
-                    <label for="password" class="sr-only">Password</label>
-                    <input id="password" name="password" type="password" required
-                        [(ngModel)]="password"
-                        class="appearance-none rounded-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-b-md focus:outline-none focus:ring-blue-500 focus:border-blue-500 focus:z-10 sm:text-sm"
-                        placeholder="Password">
-                </div>
-            </div>
 
-            <div>
-                <button type="submit"
-                    class="group relative w-full flex justify-center py-2 px-4 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500">
-                    Sign in
-                </button>
-            </div>
+        <!-- Login Card -->
+        <div class="bg-white shadow-sm border border-gray-200 rounded-xl p-8 space-y-6">
+            <form class="space-y-6" (ngSubmit)="onSubmit()">
+                <!-- Username Field -->
+                <div>
+                    <label for="username" class="block text-sm font-medium text-gray-700">Username</label>
+                    <div class="mt-1 relative">
+                        <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                            <svg class="h-5 w-5 text-gray-400" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
+                                <path fill-rule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" clip-rule="evenodd" />
+                            </svg>
+                        </div>
+                        <input
+                            id="username"
+                            name="username"
+                            type="text"
+                            required
+                            [(ngModel)]="username"
+                            class="block w-full pl-10 pr-3 py-2 border border-gray-200 rounded-lg 
+                                   placeholder-gray-500 focus:ring-2 focus:ring-indigo-500 focus:border-transparent
+                                   text-sm"
+                            placeholder="Enter your username"
+                        >
+                    </div>
+                </div>
 
-            <div *ngIf="error" class="text-red-500 text-center">
-                {{ error }}
-            </div>
-        </form>
+                <!-- Password Field -->
+                <div>
+                    <label for="password" class="block text-sm font-medium text-gray-700">Password</label>
+                    <div class="mt-1 relative">
+                        <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                            <svg class="h-5 w-5 text-gray-400" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
+                                <path fill-rule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clip-rule="evenodd" />
+                            </svg>
+                        </div>
+                        <input
+                            id="password"
+                            name="password"
+                            type="password"
+                            required
+                            [(ngModel)]="password"
+                            class="block w-full pl-10 pr-3 py-2 border border-gray-200 rounded-lg 
+                                   placeholder-gray-500 focus:ring-2 focus:ring-indigo-500 focus:border-transparent
+                                   text-sm"
+                            placeholder="Enter your password"
+                        >
+                    </div>
+                </div>
+
+                <!-- Error Message -->
+                <div *ngIf="error" 
+                     class="bg-red-50 border-l-4 border-red-500 p-4 rounded-lg flex items-center">
+                    <svg class="h-5 w-5 text-red-500 mr-2" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
+                        <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clip-rule="evenodd" />
+                    </svg>
+                    <span class="text-sm text-red-700">{{ error }}</span>
+                </div>
+
+                <!-- Submit Button -->
+                <div>
+                    <button
+                        type="submit"
+                        class="w-full flex justify-center py-2.5 px-4 border border-transparent rounded-lg
+                               text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 
+                               focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500
+                               transition-colors duration-200"
+                    >
+                        Sign in to Dashboard
+                    </button>
+                </div>
+            </form>
+        </div>
+
+        <!-- Footer -->
+        <div class="mt-8 text-center">
+            <p class="text-sm text-gray-500">
+                Protected by SSL encryption
+                <svg class="inline-block h-4 w-4 ml-1 text-green-500" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
+                    <path fill-rule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clip-rule="evenodd" />
+                </svg>
+            </p>
+        </div>
     </div>
 </div> 
