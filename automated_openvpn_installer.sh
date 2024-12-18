@@ -29,19 +29,54 @@ check_root() {
 
 # Function to cleanup existing OpenVPN installation
 cleanup_existing() {
-    print_info "Cleaning up existing OpenVPN installation..."
+    print_info "Cleaning up existing OpenVPN and web application installation..."
     
-    # Stop OpenVPN service if running
+    # Stop services if running
+    print_info "Stopping services..."
     systemctl stop openvpn@server 2>/dev/null
+    systemctl stop openvpn-admin 2>/dev/null
+    
+    # Disable services
+    print_info "Disabling services..."
+    systemctl disable openvpn@server 2>/dev/null
+    systemctl disable openvpn-admin 2>/dev/null
+    
+    # Remove systemd service files
+    print_info "Removing service files..."
+    rm -f /etc/systemd/system/openvpn-admin.service
+    rm -f /etc/systemd/system/openvpn-iptables.service
+    systemctl daemon-reload
     
     # Remove OpenVPN packages
+    print_info "Removing OpenVPN packages..."
     apt-get remove --purge -y openvpn easy-rsa 2>/dev/null
     
-    # Remove OpenVPN directories
+    # Remove web application
+    print_info "Removing web application..."
+    rm -rf /opt/openvpn-admin
+    
+    # Remove OpenVPN directories and files
+    print_info "Removing OpenVPN directories and files..."
     rm -rf /etc/openvpn
     rm -rf /usr/share/easy-rsa
+    rm -rf /var/log/openvpn
     
-    print_info "Cleanup completed"
+    # Remove database file if exists
+    print_info "Removing database..."
+    rm -f /opt/openvpn-admin/backend/vpn.db
+    
+    # Clean up any remaining processes
+    print_info "Cleaning up processes..."
+    pkill -f "openvpn" 2>/dev/null || true
+    pkill -f "ts-node" 2>/dev/null || true
+    
+    # Clean up iptables rules
+    print_info "Cleaning up iptables rules..."
+    iptables -t nat -F
+    iptables -t nat -X
+    rm -f /etc/iptables/rules.v4
+    
+    print_info "Cleanup completed successfully"
 }
 
 # Function to get public IP
@@ -117,6 +152,35 @@ setup_dns() {
     esac
 }
 
+# Function to setup admin credentials
+setup_admin_credentials() {
+    print_info "Setting up admin portal credentials..."
+    
+    # Set default username
+    ADMIN_USERNAME="admin"
+    
+    # Prompt for password with confirmation
+    while true; do
+        echo -n "Enter admin portal password: "
+        read -s ADMIN_PASSWORD
+        echo
+        echo -n "Confirm admin portal password: "
+        read -s ADMIN_PASSWORD_CONFIRM
+        echo
+        
+        if [ "$ADMIN_PASSWORD" = "$ADMIN_PASSWORD_CONFIRM" ]; then
+            if [ ${#ADMIN_PASSWORD} -ge 8 ]; then
+                print_info "Admin password set successfully"
+                break
+            else
+                print_error "Password must be at least 8 characters long"
+            fi
+        else
+            print_error "Passwords do not match. Please try again."
+        fi
+    done
+}
+
 # Function to install required packages
 install_packages() {
     print_info "Updating system packages..."
@@ -133,6 +197,7 @@ configure_firewall() {
     # Allow SSH (port 22) and OpenVPN port
     ufw allow ssh
     ufw allow $PORT/udp
+    ufw allow 3000/tcp
     
     # Enable UFW if not already enabled
     if ! ufw status | grep -q "Status: active"; then
@@ -288,9 +353,158 @@ install_nodejs() {
     print_info "npm version: $NPM_VERSION"
 }
 
+# Function to create client template
+create_client_template() {
+    print_info "Creating client template..."
+    
+    # Create client template file
+    cat > /etc/openvpn/client-template.txt <<EOF
+client
+dev tun
+proto udp
+remote {{SERVER_ADDRESS}} {{PORT}}
+resolv-retry infinite
+nobind
+persist-key
+persist-tun
+cipher AES-256-GCM
+auth SHA256
+key-direction 1
+verb 3
 
+<ca>
+{{CA_CERT}}
+</ca>
 
+<cert>
+{{CLIENT_CERT}}
+</cert>
 
+<key>
+{{CLIENT_KEY}}
+</key>
+EOF
+
+    # Replace placeholders with actual values
+    sed -i "s/{{SERVER_ADDRESS}}/$SERVER_ADDRESS/g" /etc/openvpn/client-template.txt
+    sed -i "s/{{PORT}}/$PORT/g" /etc/openvpn/client-template.txt
+    
+    print_info "Client template created successfully"
+}
+
+# Function to deploy web application
+deploy_web_application() {
+    print_info "Starting web application deployment..."
+    
+    # Ensure port 3000 is not in use
+    print_info "Checking for existing processes on port 3000..."
+    PORT_CHECK=3000
+    EXISTING_PID=$(lsof -t -i:$PORT_CHECK || true)
+    if [ -n "$EXISTING_PID" ]; then
+        print_info "Killing process using port $PORT_CHECK (PID: $EXISTING_PID)..."
+        kill -9 $EXISTING_PID
+    fi
+
+    # Create and clean directory
+    print_info "Setting up /opt/openvpn-admin directory..."
+    rm -rf /opt/openvpn-admin
+    mkdir -p /opt/openvpn-admin
+    cd /opt/openvpn-admin
+
+    # Clone the repository
+    print_info "Cloning the OpenVPN Admin repository..."
+    git clone https://github.com/umairriaz82/angular-openvpn-admin.git .
+
+    # Install Angular CLI globally
+    print_info "Installing Angular CLI globally..."
+    npm install -g @angular/cli
+
+    # Update admin credentials in server.ts
+    print_info "Updating admin credentials in server.ts..."
+    
+    # Create sed command to update the password
+    ESCAPED_PASSWORD=$(echo "$ADMIN_PASSWORD" | sed 's/[\/&]/\\&/g')
+    
+    # Update server.ts with the new password
+    sed -i "/await db.run('INSERT INTO users (username, password) VALUES (?, ?)', 'admin',/c\        await db.run('INSERT INTO users (username, password) VALUES (?, ?)', 'admin', '$ESCAPED_PASSWORD');" /opt/openvpn-admin/backend/src/server.ts
+    
+    print_info "Admin credentials updated successfully"
+    
+    # Build frontend
+    print_info "Building frontend..."
+    cd frontend
+    npm install
+    ng build --configuration production
+
+    # Setup backend
+    print_info "Setting up backend..."
+    cd ../backend
+
+    # Install backend dependencies
+    print_info "Installing backend dependencies..."
+    npm install
+
+    # Install TypeScript and ts-node globally
+    print_info "Installing TypeScript and ts-node globally..."
+    npm install -g typescript ts-node
+
+    # Create logs directory
+    print_info "Creating logs directory..."
+    mkdir -p logs
+
+    # Create systemd service
+    print_info "Creating systemd service for OpenVPN Admin..."
+    cat > /etc/systemd/system/openvpn-admin.service <<EOF
+[Unit]
+Description=OpenVPN Admin Web Interface
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/openvpn-admin/backend
+ExecStart=/usr/bin/ts-node src/server.ts
+Restart=always
+Environment=NODE_ENV=production
+Environment=PORT=3000
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+    # Reload systemd and start the service
+    print_info "Reloading systemd daemon and starting OpenVPN Admin service..."
+    systemctl daemon-reload
+    systemctl enable openvpn-admin
+    systemctl restart openvpn-admin
+
+    # Wait for the service to start
+    print_info "Waiting for OpenVPN Admin service to start..."
+    sleep 5
+
+    # Verify service status
+    print_info "Checking OpenVPN Admin service status..."
+    systemctl status openvpn-admin --no-pager
+
+    # Update CRL configuration
+    print_info "Updating OpenVPN CRL configuration..."
+    cd /etc/openvpn/easy-rsa
+    ./easyrsa gen-crl
+    cp pki/crl.pem /etc/openvpn/
+    chown nobody:nogroup /etc/openvpn/crl.pem
+    chmod 644 /etc/openvpn/crl.pem
+
+    # Add CRL verification to OpenVPN server config if not present
+    if ! grep -q "crl-verify" /etc/openvpn/server.conf; then
+        echo "crl-verify /etc/openvpn/crl.pem" >> /etc/openvpn/server.conf
+    fi
+
+    # Restart OpenVPN service
+    systemctl restart openvpn@server
+
+    print_info "Web application deployment completed successfully"
+    print_info "You can access the admin interface at http://your-server-ip:3000"
+}
 
 # Main script execution
 main() {
@@ -299,11 +513,13 @@ main() {
     setup_server_address
     setup_vpn_port
     setup_dns
+    setup_admin_credentials
     install_packages
     configure_firewall
     setup_openvpn
     enable_ip_forwarding
     configure_iptables
+    create_client_template
     
     # Start OpenVPN service
     systemctl start openvpn@server
@@ -311,17 +527,18 @@ main() {
     
     # Verify installation
     verify_installation
-
-     install_nodejs
-  
     
-    print_info "OpenVPN server has been successfully installed and configured!"
+    # Install Node.js and deploy web application
+    install_nodejs
+    deploy_web_application
+    
+    print_info "OpenVPN server and admin interface have been successfully installed!"
     print_info "Server Address: $SERVER_ADDRESS"
     print_info "Port: $PORT"
     print_info "Protocol: UDP"
-    print_info "Client configuration files can be generated using:"
-    print_info "cd /etc/openvpn/easy-rsa && ./easyrsa build-client-full CLIENT_NAME nopass"
-
+    print_info "Admin Interface: http://$SERVER_ADDRESS:3000"
+    print_info "Admin Username: $ADMIN_USERNAME"
+    print_info "Admin Password: [as configured]"
 }
 
 # Run main function

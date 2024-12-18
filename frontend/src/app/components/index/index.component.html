@@ -1,62 +1,85 @@
-<div class="p-6">
-    <div class="flex justify-between items-center mb-6">
-        <h1 class="text-2xl font-bold">VPN Clients</h1>
-        <button (click)="createNewClient()" class="bg-blue-500 text-white px-4 py-2 rounded">
+<div class="space-y-6">
+    <!-- Header with actions -->
+    <div class="flex justify-between items-center">
+        <div>
+            <h2 class="text-xl font-semibold text-gray-900">VPN Clients</h2>
+            <p class="text-sm text-gray-500 mt-1">
+                Last updated: {{ lastUpdated | date:'medium' }}
+            </p>
+        </div>
+        <button (click)="createNewClient()" 
+                class="btn btn-primary">
+            <i class="ki-duotone ki-plus fs-2"></i>
             Create New Client
         </button>
     </div>
 
-    <div *ngIf="error" class="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-4">
+    <!-- Error message -->
+    <div *ngIf="error" 
+         class="bg-danger-light text-danger px-4 py-3 rounded-lg text-sm flex items-center">
+        <i class="ki-duotone ki-warning-circle me-2"></i>
         {{ error }}
     </div>
 
-    <div class="mb-4 text-sm text-gray-600">
-        Last updated: {{ lastUpdated | date:'medium' }}
-    </div>
-
-    <div class="overflow-x-auto">
-        <table class="min-w-full bg-white">
-            <thead>
-                <tr>
-                    <th class="px-6 py-3 border-b">Name</th>
-                    <th class="px-6 py-3 border-b">Status</th>
-                    <th class="px-6 py-3 border-b">Last Connected</th>
-                    <th class="px-6 py-3 border-b">Bytes Received</th>
-                    <th class="px-6 py-3 border-b">Bytes Sent</th>
-                    <th class="px-6 py-3 border-b">Actions</th>
-                </tr>
-            </thead>
-            <tbody>
-                <tr *ngFor="let client of clients">
-                    <td class="px-6 py-4 border-b">{{client.name}}</td>
-                    <td class="px-6 py-4 border-b">
-                        <span [class]="client.status === 'connected' ? 'text-green-500' : 'text-red-500'">
-                            {{client.status}}
-                            <small class="block text-gray-500">
-                                Last updated: {{client.last_connected | date:'medium'}}
-                            </small>
-                        </span>
-                    </td>
-                    <td class="px-6 py-4 border-b">{{client.last_connected | date:'medium'}}</td>
-                    <td class="px-6 py-4 border-b">{{client.bytes_received | bytes}}</td>
-                    <td class="px-6 py-4 border-b">{{client.bytes_sent | bytes}}</td>
-                    <td class="px-6 py-4 border-b flex gap-2">
-                        <button (click)="downloadConfig(client.name)" 
-                                class="text-blue-500 hover:text-blue-700">
-                            Download
-                        </button>
-                        <button (click)="deleteClient(client.name)" 
-                                class="text-red-500 hover:text-red-700 ml-2">
-                            Delete
-                        </button>
-                    </td>
-                </tr>
-                <tr *ngIf="clients.length === 0">
-                    <td colspan="6" class="px-6 py-4 border-b text-center text-gray-500">
-                        No clients found
-                    </td>
-                </tr>
-            </tbody>
-        </table>
+    <!-- Table -->
+    <div class="card shadow-sm">
+        <div class="overflow-x-auto">
+            <table class="min-w-full divide-y divide-gray-200">
+                <thead class="bg-light">
+                    <tr>
+                        <th class="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
+                        <th class="px-6 py-4 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                        <th class="px-6 py-4 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Last Connected</th>
+                        <th class="px-6 py-4 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Received</th>
+                        <th class="px-6 py-4 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Sent</th>
+                        <th class="px-6 py-4 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+                    </tr>
+                </thead>
+                <tbody class="bg-white divide-y divide-gray-200">
+                    <tr *ngFor="let client of clients" class="hover:bg-gray-50">
+                        <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                            <div class="flex items-center">
+                                <i class="ki-duotone ki-user-circle me-2 text-gray-400"></i>
+                                {{client.name}}
+                            </div>
+                        </td>
+                        <td class="px-6 py-4 whitespace-nowrap text-center">
+                            <span [class]="client.status === 'connected' ? 
+                                'text-success bg-success-light' : 
+                                'text-danger bg-danger-light'" 
+                                  class="px-3 py-1 text-xs font-medium rounded-full inline-flex items-center justify-center">
+                                <i class="ki-duotone" 
+                                   [class]="client.status === 'connected' ? 'ki-wifi text-success' : 'ki-wifi-slash text-danger'">
+                                </i>
+                                <span class="ml-1">{{client.status}}</span>
+                            </span>
+                        </td>
+                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500 text-center">{{client.last_connected | date:'medium'}}</td>
+                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500 text-center">{{client.bytes_received | bytes}}</td>
+                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500 text-center">{{client.bytes_sent | bytes}}</td>
+                        <td class="px-6 py-4 whitespace-nowrap text-center">
+                            <div class="flex justify-center space-x-2">
+                                <button (click)="downloadConfig(client.name)" 
+                                        class="btn btn-icon btn-sm btn-primary">
+                                   <span class="text-white"><i class="ki-duotone ki-download"></i></span>
+                                </button>
+                                <button (click)="deleteClient(client.name)" 
+                                        class="btn btn-icon btn-sm btn-danger">
+                                        <span class="text-white"> <i class="ki-duotone ki-trash"></i></span>    
+                                </button>
+                            </div>
+                        </td>
+                    </tr>
+                    <tr *ngIf="clients.length === 0">
+                        <td colspan="6" class="px-6 py-8 text-center text-gray-500">
+                            <div class="flex flex-col items-center">
+                                <i class="ki-duotone ki-user-slash fs-3x text-gray-300 mb-4"></i>
+                                <p>No clients found</p>
+                            </div>
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
     </div>
 </div>

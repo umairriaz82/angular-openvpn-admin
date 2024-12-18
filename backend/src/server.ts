@@ -7,6 +7,8 @@ import { promisify } from 'util';
 import path from 'path';
 import jwt from 'jsonwebtoken';
 import * as fs from 'fs';
+import * as fsPromises from 'fs/promises';
+import { appendFile } from 'fs/promises';
 
 const execAsync = promisify(exec);
 const app = express();
@@ -169,6 +171,19 @@ async function updateClientStatus() {
     }
 }
 
+// Add this logging utility function
+async function logToFile(message: string) {
+    const timestamp = new Date().toISOString();
+    const logMessage = `${timestamp}: ${message}\n`;
+    try {
+        await appendFile('/var/log/vpn-manager/delete-operations.log', logMessage);
+    } catch (error) {
+        // If the directory doesn't exist, create it
+        await fsPromises.mkdir('/var/log/vpn-manager', { recursive: true });
+        await appendFile('/var/log/vpn-manager/delete-operations.log', logMessage);
+    }
+}
+
 // Initialize database and start server
 (async () => {
     const db = await initializeDatabase();
@@ -216,33 +231,107 @@ async function updateClientStatus() {
     });
 
     app.delete('/api/clients/:name', authenticateToken, async (req, res) => {
+        const { name } = req.params;
+        await logToFile(`=== Starting deletion process for client: ${name} ===`);
+
         try {
-            const { name } = req.params;
-            
-            // First, kill any active connection for this client
-            await execAsync(`echo "kill ${name}" | nc localhost 7505`);
-            
-            // Revoke the client certificate
-            await execAsync(`cd /etc/openvpn/easy-rsa && ./easyrsa revoke ${name}`);
-            
-            // Generate new CRL
-            await execAsync(`cd /etc/openvpn/easy-rsa && ./easyrsa gen-crl`);
-            
-            // Copy new CRL to OpenVPN directory
-            await execAsync('cp /etc/openvpn/easy-rsa/pki/crl.pem /etc/openvpn/');
-            
-            // Remove client files
-            await execAsync(`rm -f /etc/openvpn/easy-rsa/pki/issued/${name}.crt`);
-            await execAsync(`rm -f /etc/openvpn/easy-rsa/pki/private/${name}.key`);
-            await execAsync(`rm -f /etc/openvpn/easy-rsa/pki/reqs/${name}.req`);
-            
+            // First check if client exists
+            const client = await db.get('SELECT * FROM vpn_clients WHERE name = ?', name);
+            if (!client) {
+                await logToFile(`Client ${name} not found in database`);
+                return res.status(404).json({ error: 'Client not found' });
+            }
+            await logToFile(`Found client in database: ${JSON.stringify(client)}`);
+
+            // Change to the correct directory first
+            await logToFile('Changing to OpenVPN easy-rsa directory');
+            process.chdir('/etc/openvpn/easy-rsa');
+
+            // Execute revocation commands exactly as in the shell script
+            const commands = [
+                {
+                    cmd: './easyrsa --batch revoke ' + name,
+                    description: 'Revoking certificate'
+                },
+                {
+                    cmd: './easyrsa gen-crl',
+                    description: 'Generating new CRL'
+                },
+                {
+                    cmd: `rm -rf pki/reqs/${name}.req`,
+                    description: 'Removing request file'
+                },
+                {
+                    cmd: `rm -rf pki/private/${name}.key`,
+                    description: 'Removing private key'
+                },
+                {
+                    cmd: `rm -rf pki/issued/${name}.crt`,
+                    description: 'Removing certificate'
+                },
+                {
+                    cmd: 'rm -rf /etc/openvpn/crl.pem',
+                    description: 'Removing old CRL'
+                },
+                {
+                    cmd: 'cp /etc/openvpn/easy-rsa/pki/crl.pem /etc/openvpn/crl.pem',
+                    description: 'Copying new CRL'
+                },
+                {
+                    cmd: 'chmod 644 /etc/openvpn/crl.pem',
+                    description: 'Setting CRL permissions'
+                },
+                {
+                    cmd: 'systemctl restart openvpn@server',
+                    description: 'Restarting OpenVPN service'
+                }
+            ];
+
+            // Execute commands sequentially
+            for (const command of commands) {
+                try {
+                    await logToFile(`Executing: ${command.description}`);
+                    await logToFile(`Command: ${command.cmd}`);
+                    const { stdout, stderr } = await execAsync(command.cmd);
+                    if (stdout) await logToFile(`${command.description} stdout: ${stdout}`);
+                    if (stderr) await logToFile(`${command.description} stderr: ${stderr}`);
+                } catch (error: any) {
+                    await logToFile(`Error during ${command.description}: ${error.message}`);
+                    if (error.stdout) await logToFile(`Error stdout: ${error.stdout}`);
+                    if (error.stderr) await logToFile(`Error stderr: ${error.stderr}`);
+                    // Continue with other commands even if one fails
+                }
+            }
+
             // Remove from database
-            await db.run('DELETE FROM vpn_clients WHERE name = ?', name);
+            await logToFile(`Removing ${name} from database`);
+            const result = await db.run('DELETE FROM vpn_clients WHERE name = ?', name);
+            await logToFile(`Database deletion result: ${JSON.stringify(result)}`);
+
+            if (result.changes === 0) {
+                await logToFile('Warning: No rows were deleted from the database');
+            }
+
+            await logToFile(`=== Completed deletion process for client ${name} ===\n`);
             
-            res.json({ message: 'Client deleted successfully' });
-        } catch (error) {
-            console.error('Error deleting client:', error);
-            res.status(500).json({ error: 'Failed to delete client' });
+            res.json({ 
+                message: 'Client deleted successfully',
+                details: {
+                    databaseChanges: result.changes
+                }
+            });
+
+        } catch (error: any) {
+            await logToFile(`Critical error in delete process: ${error.message}`);
+            await logToFile(`Error stack: ${error.stack}`);
+            await logToFile(`Error code: ${error.code}`);
+            await logToFile(`=== Delete process failed for client ${name} ===\n`);
+
+            res.status(500).json({ 
+                error: 'Failed to delete client',
+                message: error.message,
+                details: error.code
+            });
         }
     });
 

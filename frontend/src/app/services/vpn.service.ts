@@ -38,7 +38,21 @@ export class VpnService {
     }
 
     deleteClient(name: string): Observable<any> {
-        return this.http.delete(`${this.apiUrl}/clients/${name}`, { headers: this.getHeaders() });
+        console.log(`Initiating delete request for client: ${name}`);
+        return this.http.delete(`${this.apiUrl}/clients/${name}`, {
+            headers: this.getHeaders()
+        }).pipe(
+            tap(() => console.log(`Successfully deleted client: ${name}`)),
+            catchError(error => {
+                console.error('Delete client error details:', {
+                    status: error.status,
+                    statusText: error.statusText,
+                    message: error.message,
+                    error: error.error
+                });
+                return throwError(() => new Error(error.error?.message || error.message || 'Failed to delete client'));
+            })
+        );
     }
 
     downloadConfig(clientName: string): Observable<Blob> {

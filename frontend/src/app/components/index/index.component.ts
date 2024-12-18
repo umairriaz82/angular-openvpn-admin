@@ -58,9 +58,21 @@ export class IndexComponent implements OnInit, OnDestroy {
     }
 
     deleteClient(name: string) {
-        if (confirm(`Are you sure you want to delete client ${name}?`)) {
-            this.vpnService.deleteClient(name).subscribe(() => {
-                this.loadClients();
+        if (confirm(`Are you sure you want to delete client "${name}"?`)) {
+            console.log(`Attempting to delete client: ${name}`);
+            this.vpnService.deleteClient(name).subscribe({
+                next: (response) => {
+                    console.log(`Delete response:`, response);
+                    this.error = ''; // Clear any existing errors
+                    this.loadClients(); // Reload the client list
+                },
+                error: (error) => {
+                    console.error('Delete error:', error);
+                    this.error = `Failed to delete client ${name}: ${error.message}`;
+                    
+                    // Reload clients list anyway to ensure UI is in sync
+                    this.loadClients();
+                }
             });
         }
     }
