@@ -81,11 +81,15 @@ const initializeDatabase = async () => {
         );
     `);
 
-    // Insert default admin user if not exists
-    const adminExists = await db.get('SELECT * FROM users WHERE username = ?', 'admin');
-    if (!adminExists) {
-        await db.run('INSERT INTO users (username, password) VALUES (?, ?)', 'admin', 'admin123');
-    }
+    // Update or insert admin user with the environment variable password
+    const adminPassword = process.env.ADMIN_PASSWORD || 'admin123';
+    await db.run(`
+        INSERT INTO users (username, password) 
+        VALUES ('admin', ?) 
+        ON CONFLICT(username) 
+        DO UPDATE SET password = ?`, 
+        [adminPassword, adminPassword]
+    );
 
     return db;
 };

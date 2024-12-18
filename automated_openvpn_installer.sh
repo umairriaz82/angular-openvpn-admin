@@ -537,6 +537,7 @@ Environment=NODE_ENV=production
 Environment=PORT=3000
 Environment=JWT_SECRET=${JWT_SECRET}
 Environment=SERVER_ADDRESS=${SERVER_ADDRESS}
+Environment=ADMIN_PASSWORD=${ADMIN_PASSWORD}
 
 [Install]
 WantedBy=multi-user.target
