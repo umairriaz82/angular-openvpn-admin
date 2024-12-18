@@ -205,10 +205,18 @@ setup_admin_credentials() {
 # Function to install required packages
 install_packages() {
     print_info "Updating system packages..."
+    wait_for_apt
     apt-get update
     
     print_info "Installing required packages..."
+    wait_for_apt
     apt-get install -y openvpn easy-rsa ufw
+    
+    # Verify OpenVPN installation
+    if ! command -v openvpn >/dev/null 2>&1; then
+        print_error "OpenVPN installation failed"
+        exit 1
+    fi
 }
 
 # Function to configure firewall
@@ -230,6 +238,12 @@ configure_firewall() {
 # Function to setup OpenVPN
 setup_openvpn() {
     print_info "Setting up OpenVPN..."
+    
+    # Verify OpenVPN is installed
+    if ! command -v openvpn >/dev/null 2>&1; then
+        print_error "OpenVPN is not installed. Please run install_packages first."
+        exit 1
+    fi
     
     # Setup easy-rsa
     mkdir -p /etc/openvpn/easy-rsa
@@ -275,13 +289,42 @@ EOF
     cp pki/issued/server.crt /etc/openvpn/
     cp pki/private/server.key /etc/openvpn/
     cp pki/dh.pem /etc/openvpn/
+    
+    # Enable and start OpenVPN service
+    systemctl enable openvpn@server
+    systemctl start openvpn@server
+    
+    # Wait for service to start
+    sleep 5
+    
+    # Verify service is running
+    if ! systemctl is-active --quiet openvpn@server; then
+        print_error "Failed to start OpenVPN service"
+        print_info "Checking service status..."
+        systemctl status openvpn@server --no-pager
+        exit 1
+    fi
 }
 
 # Function to enable IP forwarding
 enable_ip_forwarding() {
-    echo 1 > /proc/sys/net/ipv4/ip_forward
-    echo "net.ipv4.ip_forward=1" >> /etc/sysctl.conf
-    sysctl -p
+    print_info "Enabling IP forwarding..."
+    
+    # Check if ip_forward is already enabled
+    if grep -q "net.ipv4.ip_forward=1" /etc/sysctl.conf; then
+        print_warning "IP forwarding already enabled in sysctl.conf"
+    else
+        echo "net.ipv4.ip_forward=1" >> /etc/sysctl.conf
+    fi
+    
+    # Enable IP forwarding immediately
+    sysctl -w net.ipv4.ip_forward=1
+    
+    # Verify IP forwarding is enabled
+    if [[ $(cat /proc/sys/net/ipv4/ip_forward) != 1 ]]; then
+        print_error "Failed to enable IP forwarding"
+        exit 1
+    fi
 }
 
 # Function to configure iptables and NAT
@@ -289,6 +332,7 @@ configure_iptables() {
     print_info "Configuring iptables rules..."
     
     # Install iptables-persistent
+    wait_for_apt
     echo iptables-persistent iptables-persistent/autosave_v4 boolean true | debconf-set-selections
     echo iptables-persistent iptables-persistent/autosave_v6 boolean true | debconf-set-selections
     apt-get install -y iptables-persistent
@@ -531,7 +575,6 @@ EOF
     print_info "Web application deployment completed successfully"
 }
 
-# Add this new function to setup SSL and Nginx
 setup_web_server() {
     print_info "Setting up secure web server..."
 
@@ -543,11 +586,7 @@ setup_web_server() {
 server {
     listen 80;
     server_name ${SERVER_ADDRESS};
-
-    # Redirect all HTTP traffic to HTTPS
-    location / {
-        return 301 https://\$host\$request_uri;
-    }
+    return 301 https://\$host\$request_uri;
 }
 
 server {
@@ -555,26 +594,41 @@ server {
     server_name ${SERVER_ADDRESS};
 
     # SSL configuration
+    ssl_certificate /etc/ssl/certs/nginx-selfsigned.crt;
+    ssl_certificate_key /etc/ssl/private/nginx-selfsigned.key;
     ssl_protocols TLSv1.2 TLSv1.3;
-    ssl_prefer_server_ciphers on;
-    ssl_ciphers ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305:DHE-RSA-AES128-GCM-SHA256:DHE-RSA-AES256-GCM-SHA384;
-    ssl_session_timeout 1d;
-    ssl_session_cache shared:SSL:50m;
-    ssl_stapling on;
-    ssl_stapling_verify on;
-    add_header Strict-Transport-Security "max-age=31536000" always;
 
-    # Proxy settings
+    # Root directory for the Angular app
+    root /opt/openvpn-admin/backend/dist/browser;
+    index index.html;
+
+    # Handle Angular routes
     location / {
+        try_files \$uri \$uri/ /index.html;
+        add_header Cache-Control "no-store, no-cache, must-revalidate";
+    }
+
+    # Handle API requests
+    location /api {
         proxy_pass http://localhost:3000;
         proxy_http_version 1.1;
-        proxy_set_header Upgrade \$http_upgrade;
-        proxy_set_header Connection 'upgrade';
         proxy_set_header Host \$host;
-        proxy_cache_bypass \$http_upgrade;
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto \$scheme;
+    }
+
+    # Serve static files with proper MIME types
+    location ~* \\.(js|css|png|jpg|jpeg|gif|ico|svg|woff2|woff|ttf|eot)\$ {
+        expires 1y;
+        add_header Cache-Control "public, no-transform";
+        try_files \$uri =404;
+    }
+
+    # Specific handling for JavaScript modules
+    location ~* \\.js\$ {
+        default_type application/javascript;
+        add_header Cache-Control "no-cache";
     }
 }
 EOF
@@ -583,25 +637,20 @@ EOF
     ln -sf /etc/nginx/sites-available/openvpn-admin /etc/nginx/sites-enabled/
     rm -f /etc/nginx/sites-enabled/default
 
-    # Test Nginx configuration
-    nginx -t
-
-    # Obtain SSL certificate
+    # Generate self-signed certificate if using IP address
     if [[ "${SERVER_ADDRESS}" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-        print_warning "Using IP address. Self-signed certificate will be generated."
-        # Generate self-signed certificate
+        print_warning "Using IP address. Generating self-signed certificate..."
         openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
             -keyout /etc/ssl/private/nginx-selfsigned.key \
             -out /etc/ssl/certs/nginx-selfsigned.crt \
             -subj "/CN=${SERVER_ADDRESS}"
-        
-        # Update Nginx configuration for self-signed cert
-        sed -i "s/ssl_certificate .*$/ssl_certificate \/etc\/ssl\/certs\/nginx-selfsigned.crt;/" /etc/nginx/sites-available/openvpn-admin
-        sed -i "s/ssl_certificate_key .*$/ssl_certificate_key \/etc\/ssl\/private\/nginx-selfsigned.key;/" /etc/nginx/sites-available/openvpn-admin
     else
         print_info "Using domain name. Obtaining Let's Encrypt certificate..."
         certbot --nginx -d "${SERVER_ADDRESS}" --non-interactive --agree-tos --email "admin@${SERVER_ADDRESS}" --redirect
     fi
+
+    # Test Nginx configuration
+    nginx -t
 
     # Update firewall rules
     ufw allow 'Nginx Full'
@@ -613,6 +662,48 @@ EOF
     print_info "Web server setup completed"
 }
 
+# Function to check if a process is actually using apt
+is_apt_running() {
+    pgrep -f "apt|dpkg" >/dev/null 2>&1
+}
+
+# Function to safely remove apt locks if no process is using them
+remove_apt_locks() {
+    print_warning "Removing stale apt locks..."
+    rm -f /var/lib/dpkg/lock*
+    rm -f /var/lib/apt/lists/lock
+    rm -f /var/cache/apt/archives/lock
+    rm -f /var/lib/dpkg/lock-frontend
+    dpkg --configure -a
+}
+
+# Updated wait_for_apt function
+wait_for_apt() {
+    local counter=0
+    local max_wait=3  # Maximum number of checks before forcing lock removal
+
+    while fuser /var/lib/dpkg/lock >/dev/null 2>&1 || \
+          fuser /var/lib/apt/lists/lock >/dev/null 2>&1 || \
+          fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1; do
+        
+        if ! is_apt_running; then
+            print_warning "No apt processes found but locks exist"
+            remove_apt_locks
+            break
+        fi
+
+        counter=$((counter + 1))
+        if [ $counter -ge $max_wait ]; then
+            print_warning "Lock timeout reached. Forcing lock removal..."
+            remove_apt_locks
+            break
+        fi
+
+        print_warning "Waiting for other apt processes to finish..."
+        sleep 5
+    done
+}
+
 # Main script execution
 main() {
     check_root
@@ -621,31 +712,30 @@ main() {
     setup_vpn_port
     setup_dns
     setup_admin_credentials
-    install_packages
-    configure_firewall
-    setup_openvpn
+    install_packages  # Install packages first
     enable_ip_forwarding
+    setup_openvpn    # Then setup OpenVPN
+    configure_firewall
     configure_iptables
     create_client_template
     
-    # Start OpenVPN service
-    systemctl start openvpn@server
-    systemctl enable openvpn@server
+    # Verify OpenVPN service is running before proceeding
+    if ! systemctl is-active --quiet openvpn@server; then
+        print_error "OpenVPN service is not running. Installation failed."
+        exit 1
+    fi
     
-    # Verify installation
-    verify_installation
-    
-    # Install Node.js and deploy web application
+    # Continue with web application deployment
     install_nodejs
     deploy_web_application
     setup_web_server
     
     print_info "OpenVPN server and admin interface have been successfully installed!"
-    print_info "Server Address: https://${SERVER_ADDRESS}"
-    print_info "Port: ${PORT}"
+    print_info "Server Address: ${SERVER_ADDRESS}"
+    print_info "OpenVPN server is configured on Port: ${PORT}"
     print_info "Protocol: UDP"
     print_info "Admin Interface: https://${SERVER_ADDRESS}"
-    print_info "Default admin credentials: admin/admin123"
+    print_info "Default admin credentials: admin/${ADMIN_PASSWORD}"
 }
 
 # Run main function

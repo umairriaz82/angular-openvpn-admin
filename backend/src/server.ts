@@ -9,78 +9,51 @@ import jwt from 'jsonwebtoken';
 import * as fs from 'fs';
 import * as fsPromises from 'fs/promises';
 import { appendFile } from 'fs/promises';
-import rateLimit from 'express-rate-limit';
 import helmet from 'helmet';
 
 const execAsync = promisify(exec);
 const app = express();
 const PORT = 3000;
-const HOST = '127.0.0.1'; // Only listen on localhost
+const HOST = '0.0.0.0';
 
-// Security middleware
-app.use(helmet({
-    contentSecurityPolicy: {
-        directives: {
-            defaultSrc: ["'self'"],
-            scriptSrc: ["'self'", "'unsafe-inline'"],
-            styleSrc: ["'self'", "'unsafe-inline'"],
-            imgSrc: ["'self'", 'data:', 'https:'],
-            connectSrc: ["'self'"],
-            fontSrc: ["'self'", 'data:', 'https:'],
-            objectSrc: ["'none'"],
-            mediaSrc: ["'none'"],
-            frameSrc: ["'none'"],
-        },
-    },
-    crossOriginEmbedderPolicy: true,
-    crossOriginOpenerPolicy: true,
-    crossOriginResourcePolicy: { policy: "same-site" },
-    dnsPrefetchControl: true,
-    frameguard: { action: "deny" },
-    hidePoweredBy: true,
-    hsts: true,
-    ieNoOpen: true,
-    noSniff: true,
-    referrerPolicy: { policy: "strict-origin-when-cross-origin" },
-    xssFilter: true,
-}));
-
-// Rate limiting
-const limiter = rateLimit({
-    windowMs: 15 * 60 * 1000, // 15 minutes
-    max: 100, // Limit each IP to 100 requests per windowMs
-    message: 'Too many requests from this IP, please try again later.',
-    standardHeaders: true,
-    legacyHeaders: false,
-});
-
-// Apply rate limiting to all routes
-app.use(limiter);
-
-// Specific login rate limiter
-const loginLimiter = rateLimit({
-    windowMs: 60 * 60 * 1000, // 1 hour
-    max: 5, // Limit each IP to 5 login requests per hour
-    message: 'Too many login attempts from this IP, please try again after an hour',
-    standardHeaders: true,
-    legacyHeaders: false,
-});
-
-// CORS configuration
+// Middleware
 app.use(cors({
-    origin: `https://${process.env.SERVER_ADDRESS || 'localhost'}`,
+    origin: true, // Allow all origins temporarily
     methods: ['GET', 'POST', 'DELETE'],
     allowedHeaders: ['Content-Type', 'Authorization'],
     credentials: true
 }));
 
-app.use(express.json({ limit: '50kb' })); // Limit payload size
-
-// Trust proxy headers from Nginx
-app.set('trust proxy', 1);
+app.use(express.json());
 
 // Serve static files from the correct dist path
-app.use(express.static(path.join(__dirname, '../dist/browser')));
+app.use(express.static(path.join(__dirname, '../dist/browser'), {
+    setHeaders: (res, path) => {
+        if (path.endsWith('.js')) {
+            res.setHeader('Content-Type', 'application/javascript');
+        }
+    }
+}));
+
+// Update Helmet configuration to be less restrictive
+app.use(helmet({
+    contentSecurityPolicy: {
+        directives: {
+            defaultSrc: ["'self'"],
+            scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'"],
+            styleSrc: ["'self'", "'unsafe-inline'"],
+            imgSrc: ["'self'", 'data:', 'https:', 'http:'],
+            connectSrc: ["'self'", 'https:', 'http:', 'ws:', 'wss:'],
+            fontSrc: ["'self'", 'data:', 'https:', 'http:'],
+            objectSrc: ["'none'"],
+            mediaSrc: ["'none'"],
+            frameSrc: ["'none'"],
+        },
+    },
+    crossOriginEmbedderPolicy: false, // Disable temporarily
+    crossOriginOpenerPolicy: false,   // Disable temporarily
+    crossOriginResourcePolicy: { policy: "cross-origin" }, // Allow cross-origin
+}));
 
 // Database initialization
 const initializeDatabase = async () => {
@@ -257,24 +230,17 @@ async function logToFile(message: string) {
         const authHeader = req.headers['authorization'];
         const token = authHeader && authHeader.split(' ')[1];
 
-        if (!token) {
-            return res.status(401).json({ message: 'No token provided' });
-        }
+        if (!token) return res.sendStatus(401);
 
         jwt.verify(token, JWT_SECRET, (err: any, user: any) => {
-            if (err) {
-                if (err.name === 'TokenExpiredError') {
-                    return res.status(401).json({ message: 'Token expired' });
-                }
-                return res.status(403).json({ message: 'Invalid token' });
-            }
+            if (err) return res.sendStatus(403);
             req.user = user;
             next();
         });
     };
 
     // Routes
-    app.post('/api/login', loginLimiter, async (req, res) => {
+    app.post('/api/login', async (req, res) => {
         const { username, password } = req.body;
         const user = await db.get('SELECT * FROM users WHERE username = ?', username);
 
@@ -461,9 +427,19 @@ async function logToFile(message: string) {
         res.sendFile(path.join(__dirname, '../dist/browser/index.html'));
     });
 
+    // Add error handling middleware
+    app.use((err: any, req: any, res: any, next: any) => {
+        console.error('Error:', err);
+        res.status(err.status || 500).json({
+            message: err.message || 'Internal Server Error',
+            error: process.env.NODE_ENV === 'development' ? err : {}
+        });
+    });
+
     // Start server
     app.listen(PORT, HOST, () => {
         console.log(`Server running on ${HOST}:${PORT}`);
+        console.log(`CORS origin: ${process.env.SERVER_ADDRESS || 'all origins'}`);
     });
 
     // Run immediately and log any errors
@@ -482,12 +458,3 @@ async function logToFile(message: string) {
         }
     }, 5000);
 })();
-
-// Graceful shutdown
-process.on('SIGTERM', () => {
-    console.log('SIGTERM signal received: closing HTTP server');
-    server.close(() => {
-        console.log('HTTP server closed');
-        process.exit(0);
-    });
-});
