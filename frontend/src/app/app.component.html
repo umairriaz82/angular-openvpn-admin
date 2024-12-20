@@ -1,19 +1,7 @@
-<div class="wrapper w-full min-h-screen flex flex-col overflow-hidden bg-gray-100">
-	<!-- Top bar with user info - only show when authenticated -->
-	<div *ngIf="isAuthenticated" class="fixed top-8 left-8 right-8 h-16 bg-white rounded-xl shadow-sm z-10 flex items-center justify-between px-6">
-		<div class="text-xl font-semibold text-gray-900">OpenVPN Admin</div>
-		<div class="flex items-center space-x-4">
-			<span class="text-sm text-gray-600">{{ username }}</span>
-			<button (click)="logout()" class="btn btn-ghost-danger btn-sm">
-				<i class="ki-duotone ki-exit-right text-lg"></i>
-			</button>
-		</div>
-	</div>
-
-	<!-- Main content - adjust top margin based on authentication -->
-	<main [class]="isAuthenticated ? 'fixed top-28 left-8 right-8 bottom-8' : 'fixed top-8 left-8 right-8 bottom-8'" 
-		  class="rounded-xl shadow-lg bg-white overflow-auto">
-		<div class="p-6">
+<div class="wrapper w-full min-h-screen flex flex-col overflow-hidden">
+	<!-- Main content -->
+	<main class="fixed top-8 left-8 right-8 bottom-8 rounded-xl shadow-lg bg-white">
+		<div class="h-full p-6">
 			<router-outlet></router-outlet>
 		</div>
 	</main>

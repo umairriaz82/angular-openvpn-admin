@@ -4,6 +4,8 @@ import { FormsModule } from '@angular/forms';
 import { VpnService } from '../../services/vpn.service';
 import { VpnClient } from '../../interfaces/client.interface';
 import { BytesPipe } from '../../pipes/bytes.pipe';
+import { AuthService } from '../../services/auth.service';
+import { Router } from '@angular/router';
 
 @Component({
     selector: 'app-index',
@@ -28,9 +30,44 @@ export class IndexComponent implements OnInit, OnDestroy {
     // Add Math object
     protected Math = Math;
 
-    constructor(private vpnService: VpnService) {}
+    showModal = false;
+    newClientName = '';
+    clientNameError: string | null = null;
 
-    ngOnInit() {
+    showDeleteModal = false;
+    clientToDelete: string | null = null;
+
+    username: string = '';
+    isAuthenticated = false;
+
+    isCreatingClient = false;
+    isDeletingClient = false;
+
+    constructor(
+        private vpnService: VpnService,
+        private authService: AuthService,
+        private router: Router
+    ) {}
+
+    ngOnInit(): void {
+        this.authService.isAuthenticated().subscribe(
+            isAuth => {
+                this.isAuthenticated = isAuth;
+                if (isAuth) {
+                    const token = this.authService.getToken();
+                    if (token) {
+                        try {
+                            const tokenData = JSON.parse(atob(token.split('.')[1]));
+                            this.username = tokenData.username;
+                        } catch (e) {
+                            console.error('Error decoding token:', e);
+                        }
+                    }
+                } else {
+                    this.router.navigate(['/login']);
+                }
+            }
+        );
         this.loadClients();
         this.updateInterval = setInterval(() => {
             this.loadClients();
@@ -97,32 +134,107 @@ export class IndexComponent implements OnInit, OnDestroy {
     }
 
     createNewClient() {
-        const name = prompt('Enter client name:');
-        if (name) {
-            this.vpnService.createClient(name).subscribe(() => {
-                this.loadClients();
-            });
+        this.showModal = true;
+        this.newClientName = '';
+        this.clientNameError = null;
+    }
+
+    closeModal() {
+        this.showModal = false;
+        this.newClientName = '';
+        this.clientNameError = null;
+    }
+
+    validateClientName(name: string) {
+        // Check for spaces
+        if (name.includes(' ')) {
+            this.clientNameError = 'Client name cannot contain spaces';
+            return false;
         }
+
+        // Check for special characters (allow only alphanumeric and hyphen/underscore)
+        if (!/^[a-zA-Z0-9_-]*$/.test(name)) {
+            this.clientNameError = 'Client name can only contain letters, numbers, hyphens, and underscores';
+            return false;
+        }
+
+        // Check minimum length
+        if (name.length < 3) {
+            this.clientNameError = 'Client name must be at least 3 characters long';
+            return false;
+        }
+
+        // Check maximum length
+        if (name.length > 32) {
+            this.clientNameError = 'Client name cannot exceed 32 characters';
+            return false;
+        }
+
+        this.clientNameError = null;
+        return true;
+    }
+
+    isValidClientName(name: string): boolean {
+        return name.length >= 3 && 
+               name.length <= 32 && 
+               !name.includes(' ') && 
+               /^[a-zA-Z0-9_-]*$/.test(name);
+    }
+
+    confirmCreateClient() {
+        if (!this.isValidClientName(this.newClientName)) {
+            return;
+        }
+
+        this.isCreatingClient = true;
+        this.vpnService.createClient(this.newClientName).subscribe({
+            next: (response) => {
+                this.closeModal();
+                this.loadClients();
+                this.error = null;
+            },
+            error: (error) => {
+                this.clientNameError = error.error.message || 'Failed to create client';
+            },
+            complete: () => {
+                this.isCreatingClient = false;
+            }
+        });
     }
 
     deleteClient(name: string) {
-        if (confirm(`Are you sure you want to delete client "${name}"?`)) {
-            console.log(`Attempting to delete client: ${name}`);
-            this.vpnService.deleteClient(name).subscribe({
-                next: (response) => {
-                    console.log(`Delete response:`, response);
-                    this.error = ''; // Clear any existing errors
-                    this.loadClients(); // Reload the client list
-                },
-                error: (error) => {
-                    console.error('Delete error:', error);
-                    this.error = `Failed to delete client ${name}: ${error.message}`;
-                    
-                    // Reload clients list anyway to ensure UI is in sync
-                    this.loadClients();
-                }
-            });
-        }
+        this.clientToDelete = name;
+        this.showDeleteModal = true;
+    }
+
+    closeDeleteModal() {
+        this.showDeleteModal = false;
+        this.clientToDelete = null;
+    }
+
+    confirmDelete() {
+        if (!this.clientToDelete) return;
+
+        this.isDeletingClient = true;
+        console.log(`Attempting to delete client: ${this.clientToDelete}`);
+        
+        this.vpnService.deleteClient(this.clientToDelete).subscribe({
+            next: (response) => {
+                console.log(`Delete response:`, response);
+                this.error = '';
+                this.loadClients();
+                this.closeDeleteModal();
+            },
+            error: (error) => {
+                console.error('Delete error:', error);
+                this.error = `Failed to delete client ${this.clientToDelete}: ${error.message}`;
+                this.loadClients();
+                this.closeDeleteModal();
+            },
+            complete: () => {
+                this.isDeletingClient = false;
+            }
+        });
     }
 
     downloadConfig(clientName: string) {
@@ -148,5 +260,10 @@ export class IndexComponent implements OnInit, OnDestroy {
                 this.error = `Failed to download configuration for ${clientName}`;
             }
         });
+    }
+
+    logout() {
+        this.authService.logout();
+        this.router.navigate(['/login']);
     }
 }
