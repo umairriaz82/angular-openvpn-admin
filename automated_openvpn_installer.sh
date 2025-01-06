@@ -81,11 +81,15 @@ cleanup_existing() {
     if pgrep -f "openvpn" > /dev/null; then
         safe_execute "pkill -f 'openvpn'" "killing OpenVPN processes"
         sleep 2  # Give processes time to terminate
+    else
+        print_info "No OpenVPN processes found running"
     fi
     
     if pgrep -f "ts-node" > /dev/null; then
         safe_execute "pkill -f 'ts-node'" "killing Node.js processes"
         sleep 2  # Give processes time to terminate
+    else
+        print_info "No Node.js processes found running"
     fi
     
     # Clean up iptables rules
