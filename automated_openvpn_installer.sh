@@ -767,7 +767,9 @@ main() {
     print_info "OpenVPN server is configured on Port: ${PORT}"
     print_info "Protocol: UDP"
     print_info "Admin Interface: https://${SERVER_ADDRESS}"
-    print_info "Default admin credentials: admin/${ADMIN_PASSWORD}"
+    print_info "Default admin credentials:"
+    print_info "        Username: admin"
+    print_info "        Password: ${ADMIN_PASSWORD}"
 }
 
 # Run main function
