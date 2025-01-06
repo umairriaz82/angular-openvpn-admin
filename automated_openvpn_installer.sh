@@ -81,11 +81,15 @@ cleanup_existing() {
     if pgrep -f "openvpn" > /dev/null; then
         safe_execute "pkill -f 'openvpn'" "killing OpenVPN processes"
         sleep 2  # Give processes time to terminate
+    else
+        print_info "No OpenVPN processes found running"
     fi
     
     if pgrep -f "ts-node" > /dev/null; then
         safe_execute "pkill -f 'ts-node'" "killing Node.js processes"
         sleep 2  # Give processes time to terminate
+    else
+        print_info "No Node.js processes found running"
     fi
     
     # Clean up iptables rules
@@ -462,6 +466,11 @@ EOF
 deploy_web_application() {
     print_info "Starting web application deployment..."
     
+    # Install git first
+    print_info "Installing git..."
+    wait_for_apt
+    apt-get install -y git
+
     # Ensure port 3000 is not in use
     print_info "Checking for existing processes on port 3000..."
     PORT_CHECK=3000
@@ -479,11 +488,26 @@ deploy_web_application() {
 
     # Clone the repository
     print_info "Cloning the OpenVPN Admin repository..."
-    git clone https://github.com/umairriaz82/angular-openvpn-admin.git .
+    if ! git clone https://github.com/umairriaz82/angular-openvpn-admin.git .; then
+        print_error "Failed to clone repository"
+        exit 1
+    fi
 
-    # Install Angular CLI globally
+    # Install Angular CLI globally with autocompletion disabled
     print_info "Installing Angular CLI globally..."
-    npm install -g @angular/cli
+    npm install -g @angular/cli --no-interactive
+    # Disable Angular CLI analytics and autocompletion
+    ng analytics off --global
+
+    # Install TypeScript and ts-node globally
+    print_info "Installing TypeScript and ts-node globally..."
+    npm install -g typescript ts-node @types/node --no-interactive
+
+    # Create symbolic link to ensure ts-node is accessible
+    print_info "Creating ts-node symbolic link..."
+    if [ -f "/usr/local/bin/ts-node" ]; then
+        ln -sf /usr/local/bin/ts-node /usr/bin/ts-node
+    fi
 
     # Update admin credentials in server.ts
     print_info "Updating admin credentials in server.ts..."
@@ -531,17 +555,24 @@ After=network.target
 Type=simple
 User=root
 WorkingDirectory=/opt/openvpn-admin/backend
-ExecStart=/usr/bin/ts-node src/server.ts
+ExecStart=$(which ts-node) src/server.ts
 Restart=always
+StandardOutput=append:/var/log/openvpn-admin.log
+StandardError=append:/var/log/openvpn-admin.error.log
 Environment=NODE_ENV=production
 Environment=PORT=3000
 Environment=JWT_SECRET=${JWT_SECRET}
 Environment=SERVER_ADDRESS=${SERVER_ADDRESS}
 Environment=ADMIN_PASSWORD=${ADMIN_PASSWORD}
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
 
 [Install]
 WantedBy=multi-user.target
 EOF
+
+    # Create log files with proper permissions
+    touch /var/log/openvpn-admin.log /var/log/openvpn-admin.error.log
+    chmod 644 /var/log/openvpn-admin.log /var/log/openvpn-admin.error.log
 
     # Reload systemd and start the service
     print_info "Reloading systemd daemon and starting OpenVPN Admin service..."
