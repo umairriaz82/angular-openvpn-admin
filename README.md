@@ -32,17 +32,17 @@ To install OpenVPN and the admin interface, run these commands as root:
 
 Download the installer script
 ```bash
-wget https://raw.githubusercontent.com/umairriaz82/angular-openvpn-admin/main/automated_openvpn_installer.sh
+wget -O automated_installer.sh https://raw.githubusercontent.com/umairriaz82/angular-openvpn-admin/main/automated_openvpn_installer.sh
 ```
 
 Make the script executable
 ```bash
-chmod +x automated_openvpn_installer.sh
+chmod +x automated_installer.sh
 ```
 
 Run the installer
 ```bash
-./automated_openvpn_installer.sh
+./automated_installer.sh
 ```
 
 The installer will:
